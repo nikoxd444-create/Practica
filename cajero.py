@@ -236,3 +236,4 @@ actualizar_balance()
 actualizar_historial()
 
 ventana.mainloop()
+#fin
