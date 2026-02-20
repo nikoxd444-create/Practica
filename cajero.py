@@ -239,7 +239,7 @@ def abrir_sistema():
     ventana.mainloop()
 
 
-# ------------------ LOGIN ------------------
+# ------------------ LOGIN -------------------
 def abrir_login():
     global ventana_login, entry_nombre, entry_email, entry_password
 
