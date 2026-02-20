@@ -1,269 +1,206 @@
 import tkinter as tk
-from tkinter import messagebox, ttk
-import mysql.connector
+from tkinter import messagebox
+import sqlite3
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+from reportlab.lib import colors
+from reportlab.lib.styles import ParagraphStyle
+from reportlab.lib.units import inch
+from reportlab.pdfbase.ttfonts import TTFont
+from reportlab.pdfbase import pdfmetrics
+from reportlab.lib import fonts
+from reportlab.lib.styles import getSampleStyleSheet
+from reportlab.platypus import SimpleDocTemplate
+from reportlab.lib.pagesizes import letter
+import os
 
-# ------------------ CONEXIÓN ------------------
-conexion = mysql.connector.connect(
-    host="localhost",
-    user="root",
-    password="",
-    database="billetera"
+# ================= BASE DE DATOS =================
+
+conn = sqlite3.connect("finanzas.db")
+cursor = conn.cursor()
+
+cursor.execute("""
+CREATE TABLE IF NOT EXISTS usuarios (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    username TEXT UNIQUE,
+    password TEXT
+)python --version
+""")
+
+cursor.execute("""
+CREATE TABLE IF NOT EXISTS movimientos (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    usuario_id INTEGER,
+    tipo TEXT,
+    descripcion TEXT,
+    monto REAL
 )
+""")
 
-cursor = conexion.cursor()
+conn.commit()
 
 usuario_actual = None
-nombre_actual = None
 
-# ------------------ ESTILO ------------------
-BG_COLOR = "#0f0f1a"
-FG_COLOR = "#00f7ff"
-BTN_COLOR = "#1a1a2e"
-FONT_TITLE = ("Consolas", 22, "bold")
-FONT_NORMAL = ("Consolas", 14)
+# ================= COLORES TIPO NU =================
 
+BG_COLOR = "#121212"
+CARD_COLOR = "#1E1E1E"
+PRIMARY = "#8A05BE"
+TEXT_COLOR = "#FFFFFF"
 
-# ------------------ BALANCE ------------------
-def obtener_balance_usuario():
-    cursor.execute("""
-        SELECT 
-        SUM(CASE WHEN tipo='Ingreso' THEN monto ELSE 0 END),
-        SUM(CASE WHEN tipo='Gasto' THEN monto ELSE 0 END)
-        FROM movimientos
-        WHERE usuario_id=%s
-    """, (usuario_actual,))
-    
-    ingresos, gastos = cursor.fetchone()
-    ingresos = ingresos or 0
-    gastos = gastos or 0
-    return ingresos - gastos
+# ================= FUNCIONES =================
 
-
-# ------------------ REGISTRO ------------------
 def registrar():
-    nombre = entry_nombre.get()
-    email = entry_email.get()
-    password = entry_password.get()
+    user = entry_user.get()
+    pwd = entry_pass.get()
 
     try:
-        sql = "INSERT INTO usuarios (nombre, email, password) VALUES (%s,%s,%s)"
-        cursor.execute(sql, (nombre, email, password))
-        conexion.commit()
-        messagebox.showinfo("Éxito", "Usuario registrado 🚀")
+        cursor.execute("INSERT INTO usuarios (username, password) VALUES (?, ?)", (user, pwd))
+        conn.commit()
+        messagebox.showinfo("Éxito", "Usuario registrado correctamente")
     except:
-        messagebox.showerror("Error", "El email ya existe")
+        messagebox.showerror("Error", "El usuario ya existe")
 
-
-# ------------------ LOGIN ------------------
 def login():
-    global usuario_actual, nombre_actual
+    global usuario_actual
+    user = entry_user.get()
+    pwd = entry_pass.get()
 
-    email = entry_email.get()
-    password = entry_password.get()
-
-    sql = "SELECT id, nombre FROM usuarios WHERE email=%s AND password=%s"
-    cursor.execute(sql, (email, password))
+    cursor.execute("SELECT id FROM usuarios WHERE username=? AND password=?", (user, pwd))
     resultado = cursor.fetchone()
 
     if resultado:
         usuario_actual = resultado[0]
-        nombre_actual = resultado[1]
-        ventana_login.destroy()
-        abrir_sistema()
+        mostrar_interfaz_principal()
     else:
         messagebox.showerror("Error", "Datos incorrectos")
 
+def cerrar_sesion():
+    global usuario_actual
+    usuario_actual = None
+    frame_principal.pack_forget()
+    frame_login.pack(pady=50)
 
-# ------------------ SISTEMA PRINCIPAL ------------------
-def abrir_sistema():
-    ventana = tk.Tk()
-    ventana.title("Sistema Financiero")
-    ventana.geometry("1000x650")
-    ventana.configure(bg=BG_COLOR)
+def agregar_movimiento(tipo):
+    descripcion = entry_desc.get()
+    monto = entry_monto.get()
 
-    # -------- CERRAR SESIÓN --------
-    def cerrar_sesion():
-        global usuario_actual, nombre_actual
-        usuario_actual = None
-        nombre_actual = None
-        ventana.destroy()
-        abrir_login()
+    if descripcion == "" or monto == "":
+        messagebox.showerror("Error", "Complete todos los campos")
+        return
 
-    # Título
-    tk.Label(ventana,
-             text=f"Bienvenido, {nombre_actual}",
-             font=FONT_TITLE,
-             fg=FG_COLOR,
-             bg=BG_COLOR).pack(pady=20)
+    cursor.execute("INSERT INTO movimientos (usuario_id, tipo, descripcion, monto) VALUES (?, ?, ?, ?)",
+                   (usuario_actual, tipo, descripcion, float(monto)))
+    conn.commit()
+    mostrar_movimientos()
+    entry_desc.delete(0, tk.END)
+    entry_monto.delete(0, tk.END)
 
-    # Balance
-    lbl_balance = tk.Label(ventana,
-                           font=("Consolas", 18, "bold"),
-                           fg="#00ff88",
-                           bg=BG_COLOR)
-    lbl_balance.pack()
+def mostrar_movimientos():
+    lista_movimientos.delete(0, tk.END)
+    cursor.execute("SELECT id, tipo, descripcion, monto FROM movimientos WHERE usuario_id=?", (usuario_actual,))
+    for mov in cursor.fetchall():
+        lista_movimientos.insert(tk.END, f"{mov[0]} | {mov[1]} | {mov[2]} | ${mov[3]}")
 
-    frame_inputs = tk.Frame(ventana, bg=BG_COLOR)
-    frame_inputs.pack(pady=20)
+def borrar_movimiento():
+    seleccion = lista_movimientos.get(tk.ACTIVE)
+    if seleccion:
+        mov_id = seleccion.split("|")[0].strip()
+        cursor.execute("DELETE FROM movimientos WHERE id=?", (mov_id,))
+        conn.commit()
+        mostrar_movimientos()
 
-    tk.Label(frame_inputs, text="Descripción",
-             font=FONT_NORMAL, fg=FG_COLOR, bg=BG_COLOR).grid(row=0, column=0, padx=15)
+def exportar_pdf():
+    cursor.execute("SELECT tipo, descripcion, monto FROM movimientos WHERE usuario_id=?", (usuario_actual,))
+    datos = cursor.fetchall()
 
-    tk.Label(frame_inputs, text="Monto",
-             font=FONT_NORMAL, fg=FG_COLOR, bg=BG_COLOR).grid(row=1, column=0, padx=15)
+    if not datos:
+        messagebox.showwarning("Vacío", "No hay datos para exportar")
+        return
 
-    entry_desc = tk.Entry(frame_inputs, font=FONT_NORMAL, width=20)
-    entry_desc.grid(row=0, column=1, pady=5)
+    filename = f"Historial_usuario_{usuario_actual}.pdf"
+    doc = SimpleDocTemplate(filename, pagesize=letter)
+    elementos = []
 
-    entry_monto = tk.Entry(frame_inputs, font=FONT_NORMAL, width=20)
-    entry_monto.grid(row=1, column=1, pady=5)
+    estilos = getSampleStyleSheet()
+    elementos.append(Paragraph("Historial Financiero", estilos["Heading1"]))
+    elementos.append(Spacer(1, 0.3 * inch))
 
-    def actualizar_balance():
-        balance = obtener_balance_usuario()
-        lbl_balance.config(text=f"Balance Actual: $ {balance:,.2f}")
+    tabla_datos = [["Tipo", "Descripción", "Monto"]]
+    for d in datos:
+        tabla_datos.append([d[0], d[1], f"${d[2]}"])
 
-    def agregar_ingreso():
-        try:
-            monto = float(entry_monto.get())
-        except:
-            messagebox.showerror("Error", "Monto inválido")
-            return
+    tabla = Table(tabla_datos)
+    tabla.setStyle(TableStyle([
+        ('BACKGROUND', (0,0), (-1,0), colors.purple),
+        ('TEXTCOLOR', (0,0), (-1,0), colors.white),
+        ('GRID', (0,0), (-1,-1), 1, colors.grey)
+    ]))
 
-        cursor.execute("""
-            INSERT INTO movimientos (usuario_id, tipo, descripcion, monto)
-            VALUES (%s,'Ingreso',%s,%s)
-        """, (usuario_actual, entry_desc.get(), monto))
-        conexion.commit()
-        mostrar()
-        actualizar_balance()
+    elementos.append(tabla)
+    doc.build(elementos)
 
-    def retirar_dinero():
-        try:
-            monto = float(entry_monto.get())
-        except:
-            messagebox.showerror("Error", "Monto inválido")
-            return
+    messagebox.showinfo("PDF generado", f"Se creó {filename}")
 
-        balance = obtener_balance_usuario()
+def mostrar_interfaz_principal():
+    frame_login.pack_forget()
+    frame_principal.pack(fill="both", expand=True)
+    mostrar_movimientos()
 
-        if monto > balance:
-            messagebox.showerror("Error", "Saldo insuficiente ❌")
-            return
+# ================= INTERFAZ =================
 
-        cursor.execute("""
-            INSERT INTO movimientos (usuario_id, tipo, descripcion, monto)
-            VALUES (%s,'Gasto',%s,%s)
-        """, (usuario_actual, entry_desc.get(), monto))
-        conexion.commit()
-        mostrar()
-        actualizar_balance()
+root = tk.Tk()
+root.title("Sistema Financiero")
+root.geometry("700x500")
+root.configure(bg=BG_COLOR)
 
-    def borrar():
-        seleccionado = tabla.selection()
-        if seleccionado:
-            id_mov = tabla.item(seleccionado)['values'][0]
-            cursor.execute("DELETE FROM movimientos WHERE id=%s", (id_mov,))
-            conexion.commit()
-            mostrar()
-            actualizar_balance()
+# ================= LOGIN =================
 
-    def mostrar():
-        for row in tabla.get_children():
-            tabla.delete(row)
+frame_login = tk.Frame(root, bg=BG_COLOR)
 
-        cursor.execute("""
-            SELECT m.id, u.nombre, m.tipo, m.descripcion, m.monto, m.fecha
-            FROM movimientos m
-            JOIN usuarios u ON m.usuario_id = u.id
-            WHERE m.usuario_id=%s
-        """, (usuario_actual,))
+tk.Label(frame_login, text="Iniciar Sesión", font=("Arial", 20, "bold"), bg=BG_COLOR, fg=PRIMARY).pack(pady=20)
 
-        for fila in cursor.fetchall():
-            tabla.insert("", "end", values=fila)
+entry_user = tk.Entry(frame_login, font=("Arial", 14))
+entry_user.pack(pady=5)
 
-    # -------- BOTONES --------
-    tk.Button(frame_inputs, text="Agregar Ingreso",
-              bg=BTN_COLOR, fg=FG_COLOR,
-              font=FONT_NORMAL,
-              command=agregar_ingreso).grid(row=2, column=0, pady=15)
+entry_pass = tk.Entry(frame_login, font=("Arial", 14), show="*")
+entry_pass.pack(pady=5)
 
-    tk.Button(frame_inputs, text="Retirar Dinero",
-              bg="#330000", fg="white",
-              font=FONT_NORMAL,
-              command=retirar_dinero).grid(row=2, column=1, pady=15)
+tk.Button(frame_login, text="Login", bg=PRIMARY, fg="white", width=20, command=login).pack(pady=10)
+tk.Button(frame_login, text="Registrar", bg=CARD_COLOR, fg="white", width=20, command=registrar).pack()
 
-    tk.Button(frame_inputs, text="Borrar Movimiento",
-              bg="#550000", fg="white",
-              font=FONT_NORMAL,
-              command=borrar).grid(row=2, column=2, padx=10)
+frame_login.pack(pady=50)
 
-    tk.Button(ventana, text="Cerrar Sesión",
-              bg="#222244", fg="white",
-              font=("Consolas", 12, "bold"),
-              command=cerrar_sesion).pack(pady=10)
+# ================= PRINCIPAL =================
 
-    # -------- TABLA --------
-    tabla = ttk.Treeview(ventana,
-                         columns=("ID","Usuario","Tipo","Desc","Monto","Fecha"),
-                         show="headings",
-                         height=15)
+frame_principal = tk.Frame(root, bg=BG_COLOR)
 
-    for col in ("ID","Usuario","Tipo","Desc","Monto","Fecha"):
-        tabla.heading(col, text=col)
-        tabla.column(col, width=150)
+tk.Label(frame_principal, text="Panel Financiero", font=("Arial", 20, "bold"), bg=BG_COLOR, fg=PRIMARY).pack(pady=10)
 
-    tabla.pack(pady=20)
+frame_form = tk.Frame(frame_principal, bg=CARD_COLOR)
+frame_form.pack(pady=10)
 
-    actualizar_balance()
-    mostrar()
-    ventana.mainloop()
+entry_desc = tk.Entry(frame_form, width=25)
+entry_desc.grid(row=0, column=0, padx=5, pady=5)
 
+entry_monto = tk.Entry(frame_form, width=15)
+entry_monto.grid(row=0, column=1, padx=5, pady=5)
 
-# ------------------ VENTANA LOGIN ------------------
-def abrir_login():
-    global ventana_login, entry_nombre, entry_email, entry_password
+tk.Button(frame_form, text="Agregar Ingreso", bg=PRIMARY, fg="white",
+          command=lambda: agregar_movimiento("Ingreso")).grid(row=1, column=0, pady=5)
 
-    ventana_login = tk.Tk()
-    ventana_login.title("Login Futurista")
-    ventana_login.geometry("550x600")
-    ventana_login.configure(bg=BG_COLOR)
+tk.Button(frame_form, text="Agregar Gasto", bg="#B00020", fg="white",
+          command=lambda: agregar_movimiento("Gasto")).grid(row=1, column=1, pady=5)
 
-    tk.Label(ventana_login,
-             text="SISTEMA FINANCIERO",
-             font=FONT_TITLE,
-             fg=FG_COLOR,
-             bg=BG_COLOR).pack(pady=40)
+lista_movimientos = tk.Listbox(frame_principal, width=80)
+lista_movimientos.pack(pady=10)
 
-    tk.Label(ventana_login, text="Nombre (Registro)",
-             font=FONT_NORMAL, fg=FG_COLOR, bg=BG_COLOR).pack()
+tk.Button(frame_principal, text="Borrar Movimiento", bg=CARD_COLOR, fg="white",
+          command=borrar_movimiento).pack(pady=5)
 
-    entry_nombre = tk.Entry(ventana_login, font=FONT_NORMAL, width=25)
-    entry_nombre.pack(pady=5)
+tk.Button(frame_principal, text="Exportar a PDF", bg=PRIMARY, fg="white",
+          command=exportar_pdf).pack(pady=5)
 
-    tk.Label(ventana_login, text="Email",
-             font=FONT_NORMAL, fg=FG_COLOR, bg=BG_COLOR).pack()
+tk.Button(frame_principal, text="Cerrar Sesión", bg="#333333", fg="white",
+          command=cerrar_sesion).pack(pady=10)
 
-    entry_email = tk.Entry(ventana_login, font=FONT_NORMAL, width=25)
-    entry_email.pack(pady=5)
-
-    tk.Label(ventana_login, text="Password",
-             font=FONT_NORMAL, fg=FG_COLOR, bg=BG_COLOR).pack()
-
-    entry_password = tk.Entry(ventana_login, show="*", font=FONT_NORMAL, width=25)
-    entry_password.pack(pady=5)
-
-    tk.Button(ventana_login, text="Registrarse",
-              bg=BTN_COLOR, fg=FG_COLOR,
-              font=FONT_NORMAL,
-              command=registrar).pack(pady=15)
-
-    tk.Button(ventana_login, text="Iniciar Sesión",
-              bg=BTN_COLOR, fg=FG_COLOR,
-              font=FONT_NORMAL,
-              command=login).pack(pady=10)
-
-    ventana_login.mainloop()
-
-
-# INICIAR
-abrir_login()
+root.mainloop()
