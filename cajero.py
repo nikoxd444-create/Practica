@@ -2,6 +2,7 @@ import tkinter as tk
 from tkinter import messagebox, ttk
 import mysql.connector
 import csv
+import re
 
 # ------------------ CONEXIÓN ------------------
 conexion = mysql.connector.connect(
@@ -58,7 +59,6 @@ def abrir_sistema():
         ventana.destroy()
         abrir_login()
 
-    # Header
     header = tk.Frame(ventana, bg=BG_COLOR)
     header.pack(fill="x", pady=20)
 
@@ -76,8 +76,7 @@ def abrir_sistema():
               relief="flat",
               command=cerrar_sesion).pack(side="right", padx=40)
 
-    # Tarjeta balance
-    card = tk.Frame(ventana, bg=CARD_COLOR, bd=0)
+    card = tk.Frame(ventana, bg=CARD_COLOR)
     card.pack(pady=20, ipadx=40, ipady=30)
 
     lbl_balance = tk.Label(card,
@@ -164,57 +163,6 @@ def abrir_sistema():
         for fila in cursor.fetchall():
             tabla.insert("", "end", values=fila)
 
-    # -------- NUEVA FUNCIÓN EXPORTAR --------
-    def exportar_excel():
-        cursor.execute("""
-            SELECT m.id, u.nombre, m.tipo, m.descripcion, m.monto, m.fecha
-            FROM movimientos m
-            JOIN usuarios u ON m.usuario_id = u.id
-            WHERE m.usuario_id=%s
-        """, (usuario_actual,))
-
-        datos = cursor.fetchall()
-
-        if not datos:
-            messagebox.showwarning("Vacío", "No hay movimientos para exportar")
-            return
-
-        nombre_archivo = f"Historial_{nombre_actual}.csv"
-
-        with open(nombre_archivo, mode="w", newline="", encoding="utf-8") as archivo:
-            writer = csv.writer(archivo)
-            writer.writerow(["ID","Usuario","Tipo","Descripción","Monto","Fecha"])
-            for fila in datos:
-                writer.writerow(fila)
-
-        messagebox.showinfo("Exportado", f"Archivo generado: {nombre_archivo}")
-
-    # Botones
-    tk.Button(frame_inputs, text="Ingresar Dinero",
-              bg=BTN_COLOR, fg="white",
-              font=("Segoe UI", 12, "bold"),
-              relief="flat",
-              command=agregar_ingreso).grid(row=2, column=0, pady=20)
-
-    tk.Button(frame_inputs, text="Retirar Dinero",
-              bg="#7E22CE", fg="white",
-              font=("Segoe UI", 12, "bold"),
-              relief="flat",
-              command=retirar_dinero).grid(row=2, column=1, pady=20)
-
-    tk.Button(frame_inputs, text="Borrar Movimiento",
-              bg="#6B21A8", fg="white",
-              font=("Segoe UI", 12),
-              relief="flat",
-              command=borrar).grid(row=2, column=2, padx=15)
-
-    tk.Button(frame_inputs, text="Exportar a Excel",
-              bg=ACCENT_COLOR, fg="white",
-              font=("Segoe UI", 12, "bold"),
-              relief="flat",
-              command=exportar_excel).grid(row=2, column=3, padx=15)
-
-    # Tabla
     style = ttk.Style()
     style.theme_use("clam")
     style.configure("Treeview",
@@ -254,6 +202,14 @@ def abrir_login():
              fg="white",
              bg=BG_COLOR).pack(pady=50)
 
+    # Mensaje explicativo
+    tk.Label(ventana_login,
+             text="Requisitos:\nNombre mínimo 3 letras (solo letras)\nEmail válido (ej: usuario@gmail.com)\nPassword mínimo 6 caracteres, 1 número y 1 mayúscula",
+             font=("Segoe UI", 10),
+             fg="white",
+             bg=BG_COLOR,
+             justify="center").pack(pady=10)
+
     tk.Label(ventana_login, text="Nombre (Registro)",
              font=FONT_NORMAL, fg="white", bg=BG_COLOR).pack()
 
@@ -288,15 +244,36 @@ def abrir_login():
 
 
 def registrar():
-    nombre = entry_nombre.get()
-    email = entry_email.get()
-    password = entry_password.get()
+    nombre = entry_nombre.get().strip()
+    email = entry_email.get().strip()
+    password = entry_password.get().strip()
+
+    if not nombre or not email or not password:
+        messagebox.showerror("Error", "Todos los campos son obligatorios")
+        return
+
+    if len(nombre) < 3 or not nombre.isalpha():
+        messagebox.showerror("Error", "El nombre debe tener mínimo 3 letras y solo letras")
+        return
+
+    patron_email = r"^[\w\.-]+@[\w\.-]+\.\w+$"
+    if not re.match(patron_email, email):
+        messagebox.showerror("Error", "Formato de email inválido")
+        return
+
+    if len(password) < 6:
+        messagebox.showerror("Error", "La contraseña debe tener mínimo 6 caracteres")
+        return
+
+    if not re.search(r"[A-Z]", password) or not re.search(r"[0-9]", password):
+        messagebox.showerror("Error", "La contraseña debe tener al menos 1 mayúscula y 1 número")
+        return
 
     try:
         sql = "INSERT INTO usuarios (nombre, email, password) VALUES (%s,%s,%s)"
         cursor.execute(sql, (nombre, email, password))
         conexion.commit()
-        messagebox.showinfo("Éxito", "Usuario registrado")
+        messagebox.showinfo("Éxito", "Usuario registrado correctamente")
     except:
         messagebox.showerror("Error", "El email ya existe")
 
@@ -304,8 +281,17 @@ def registrar():
 def login():
     global usuario_actual, nombre_actual
 
-    email = entry_email.get()
-    password = entry_password.get()
+    email = entry_email.get().strip()
+    password = entry_password.get().strip()
+
+    if not email or not password:
+        messagebox.showerror("Error", "Debe ingresar email y contraseña")
+        return
+
+    patron_email = r"^[\w\.-]+@[\w\.-]+\.\w+$"
+    if not re.match(patron_email, email):
+        messagebox.showerror("Error", "Formato de email inválido")
+        return
 
     sql = "SELECT id, nombre FROM usuarios WHERE email=%s AND password=%s"
     cursor.execute(sql, (email, password))
@@ -317,7 +303,7 @@ def login():
         ventana_login.destroy()
         abrir_sistema()
     else:
-        messagebox.showerror("Error", "Datos incorrectos")
+        messagebox.showerror("Error", "Credenciales incorrectas")
 
 
 # INICIAR
